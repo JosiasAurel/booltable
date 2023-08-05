@@ -12,9 +12,13 @@
 // *5. Print a tabular/any form of representation of that
 
 const std = @import("std");
+const print = std.debug.print;
 
 pub fn main() void {
-    simple_lexer("abcde");
+    const result = simple_lexer("abcde");
+    for (result.tokens()) |char| {
+        print("Got token {c}\n", .{char});
+    }
 }
 
 const BoolDict = struct {
@@ -34,25 +38,31 @@ const BoolDict = struct {
     }
 
     fn exists(self: Self, item: u8) bool {
-        for (self.store, 0..self.idx) |char, _| {
+        for (self.store) |char| {
             if (char == item) {
                 return true;
             }
         }
         return false;
     }
+
+    fn tokens(self: Self) []const u8 {
+        return self.store[0 .. self.idx - 1];
+    }
 };
 
 // iterate over the expression string
 // return the unique boolean variables in the expression
 //
-fn simple_lexer(expression: []const u8) void {
+fn simple_lexer(expression: []const u8) BoolDict {
     var dict = BoolDict{};
     for (expression) |char| {
         if (is_alphanumeric(char) and !dict.exists(char)) {
             dict.add(char);
         }
     }
+
+    return dict;
 }
 
 // checks for whether a character is a letter (upper/lower-case)
