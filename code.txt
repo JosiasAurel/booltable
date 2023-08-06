@@ -1,0 +1,8 @@
+
+// sample 1 = a+b
+// sample 2 = a+b.c
+// sample 3 = (a+b).(c+d)
+
+fn parse() {
+    acc = ""    
+}
