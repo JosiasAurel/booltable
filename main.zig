@@ -22,14 +22,14 @@ const print = std.debug.print;
 const BoundedArray = std.BoundedArray;
 const ConvBoundedArray = BoundedArray(u8, 40);
 const StringHashMap = std.StringHashMap;
-const ExpressionStore = StringHashMap(ConvBoundedArray);
-const HeapAllocator = std.heap.GeneralPurposeAllocator(.{});
+var HeapAllocator = std.heap.GeneralPurposeAllocator(.{}){};
 const allocator = HeapAllocator.allocator();
-
-const expression_store = ExpressionStore.init(allocator);
+const ExpressionStore = StringHashMap(ConvBoundedArray);
+var store = ExpressionStore.init(allocator);
 
 pub fn main() !void {
     const result = simple_lexer("a+b");
+
     for (result.tokens()) |char| {
         print("Got token {c}\n", .{char});
     }
@@ -51,10 +51,21 @@ pub fn main() !void {
     var a_r7 = try adjust(8, r7.constSlice());
     print("7 = {s}\n", .{a_r7.constSlice()});
 
-    var ast = parse("a");
+    const sample = "a+b";
+    const tokens = simple_lexer(sample);
+    print("sample = {s} & tokens = {s}\n", .{ sample, tokens.tokens() });
+    try set_initial_variables(tokens.tokens());
+    print("Reading a = {s} \n", .{store.get("a").?.constSlice()});
+    var ast = try parse(sample);
     print_ast(ast);
-    ast = parse("a+b");
-    print_ast(ast);
+
+    const check = HeapAllocator.deinit();
+    switch (check) {
+        .leak => {
+            print("Memory leak after deinit\n", .{});
+        },
+        .ok => {},
+    }
 }
 
 fn print_ast(ast: AstNodeKind) void {
@@ -95,6 +106,9 @@ const BoolDict = struct {
 
     fn tokens(self: Self) []const u8 {
         return self.store[0..self.idx];
+    }
+    fn len(self: Self) usize {
+        return self.idx;
     }
 };
 
@@ -164,9 +178,9 @@ fn base_10_to_binary(num: u32) !ConvBoundedArray {
 // before a binary string
 // to match the number of unique variables
 // in a boolean expression
-fn adjust(var_len: usize, str: []const u8) !ConvBoundedArray {
+fn adjust(var_count: usize, str: []const u8) !ConvBoundedArray {
     var future_buffer = try ConvBoundedArray.init(20);
-    var missing_zero_count = var_len - str.len;
+    var missing_zero_count = var_count - str.len;
     var buffer: [50]u8 = undefined;
     var idx: usize = 0;
 
@@ -204,7 +218,7 @@ const TokenStream = struct {
 const AstNode = struct { left: AstNodeKind, operator: u8, right: AstNodeKind };
 const AstNodeKind = union(enum) { uniq: u8, node: *AstNode };
 
-fn parse(expression: []const u8) AstNodeKind {
+fn parse(expression: []const u8) !AstNodeKind {
     if (expression.len == 1) return AstNodeKind{ .uniq = expression[0] };
 
     var tokens = TokenStream{ .tokens = expression };
@@ -212,12 +226,15 @@ fn parse(expression: []const u8) AstNodeKind {
     const left_node = tokens.consume();
     const next_token = tokens.consume();
     if (is_op(next_token)) {
-        const right_node = parse(expression[tokens.idx..expression.len]);
+        const right_node = try parse(expression[tokens.idx..expression.len]);
 
         switch (right_node) {
             .uniq => {
                 const buffer = [3]u8{ left_node, next_token, right_node.uniq };
-                _ = buffer;
+                print("buffer = {s}\n", .{buffer});
+                if (!store.contains(&buffer)) {
+                    try gen_and_put_truth(buffer);
+                }
                 // return AstNodeKind{ .node = &AstNode{ .left = AstNodeKind{ .uniq = left_node }, .operator = next_token, .right = @constCast(AstNodeKind{ .uniq = right_node.uniq }) } };
             },
 
@@ -232,29 +249,32 @@ fn parse(expression: []const u8) AstNodeKind {
     return AstNodeKind{ .uniq = left_node };
 }
 
-fn gen_and_put_truth(str: [3]u8) void {
-    const x = expression_store.get([1]u8{str[0]}).constSlice();
-    const y = expression_store.get([1]u8{str[2]}).constSlice();
-    const buffer = ConvBoundedArray.init(20);
+fn gen_and_put_truth(str: [3]u8) !void {
+    var res = store.get("a").?;
+    print(" x = {s}", .{res.constSlice()});
+    print(" x = {?}", .{store.get(&[1]u8{str[0]})});
+    const x = store.get(&[1]u8{str[0]}).?.constSlice();
+    const y = store.get(&[1]u8{str[2]}).?.constSlice();
+    var buffer = try ConvBoundedArray.init(20);
     var idx: usize = 0;
 
     switch (str[1]) {
         '+' => {
             for (x, 0..x.len) |b, i| {
-                try buffer.set(idx, b | y[i]);
+                buffer.set(idx, b | y[i]);
             }
         },
         '.' => {
             for (x, 0..x.len) |b, i| {
-                try buffer.set(idx, b & y[i]);
+                buffer.set(idx, b & y[i]);
             }
         },
         '!' => {},
-        _ => {},
+        else => {},
     }
 
     try buffer.resize(8);
-    expression_store.putNoClobber(str, buffer);
+    try store.put(&str, buffer);
 }
 
 fn is_op(tok: u8) bool {
@@ -266,6 +286,46 @@ fn is_op(tok: u8) bool {
 
 fn char_to_num(char: u8) u32 {
     return @intCast(char - 48);
+}
+
+fn set_initial_variables(variables: []const u8) !void {
+    print("working {s} & len = {}\n", .{ variables, variables.len });
+
+    // store the variables in a bounded array to avoid use after free
+    var vars = try ConvBoundedArray.init(5);
+    for (variables, 0..variables.len) |c, i| {
+        vars.set(i, c);
+    }
+    try vars.resize(variables.len);
+
+    // get the max decimal number to be attained while calculating
+    var max = pow(2, @intCast(variables.len));
+
+    // a buffer to store the binary string
+    var buffer = try ConvBoundedArray.init(20);
+    for (variables, 0..variables.len) |c, i| {
+        _ = c;
+        var idx: usize = 0;
+        for (0..max) |item| {
+            const bin_str = try adjust(variables.len, (try base_10_to_binary(@intCast(item))).constSlice());
+            buffer.set(idx, bin_str.get(i));
+            idx += 1;
+        }
+        try buffer.resize(max);
+
+        // please make an ugly fuckery here till it works
+        var s: [1]u8 = undefined;
+        s[0] = vars.get(i);
+        try store.put([1]u8{vars.get(i)}, buffer);
+    }
+}
+
+fn pow(base: u32, exp: u32) u32 {
+    var result = base;
+    for (0..exp - 1) |_| {
+        result *= base;
+    }
+    return result;
 }
 
 // Evaluating these boolean operations

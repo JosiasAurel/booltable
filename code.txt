@@ -5,4 +5,6 @@
 
 fn parse() {
     acc = ""    
+    for char in sample1
+        acc += char
 }
