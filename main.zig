@@ -26,13 +26,11 @@ var HeapAllocator = std.heap.GeneralPurposeAllocator(.{}){};
 const allocator = HeapAllocator.allocator();
 const ExpressionStore = StringHashMap(ConvBoundedArray);
 var store = ExpressionStore.init(allocator);
+var global_allocator = std.heap.page_allocator;
 
 pub fn main() !void {
-    const result = simple_lexer("a+b");
-
-    for (result.tokens()) |char| {
-        print("Got token {c}\n", .{char});
-    }
+    var global = try global_allocator.alloc([50]u8, 100);
+    defer global_allocator.free(global);
 
     var r0 = try base_10_to_binary(0);
     var r1 = try base_10_to_binary(1);
@@ -52,9 +50,24 @@ pub fn main() !void {
     print("7 = {s}\n", .{a_r7.constSlice()});
 
     const sample = "a+b";
-    const tokens = simple_lexer(sample);
-    print("sample = {s} & tokens = {s}\n", .{ sample, tokens.tokens() });
-    try set_initial_variables(tokens.tokens());
+    const lexed = simple_lexer(sample);
+    var tokens = try ConvBoundedArray.init(20);
+    lexed.tokens(&tokens);
+    try tokens.resize(lexed.len());
+
+    print("sample = {s} & tokens = {s}\n", .{ sample, tokens.constSlice() });
+
+    print("Typeof tokens = {s}\n", .{@typeName(@TypeOf(tokens))});
+    try set_initial_variables(tokens, global_allocator);
+    const result = store.get("a").?.constSlice();
+    for (result) |b| {
+        print("bottle {b}", .{b});
+    }
+
+    const _target = store.get("a");
+    if (_target) |target| {
+        print("type = {s}\n", .{target.constSlice()});
+    }
     print("Reading a = {s} \n", .{store.get("a").?.constSlice()});
     var ast = try parse(sample);
     print_ast(ast);
@@ -104,9 +117,12 @@ const BoolDict = struct {
         return false;
     }
 
-    fn tokens(self: Self) []const u8 {
-        return self.store[0..self.idx];
+    fn tokens(self: Self, dest: *ConvBoundedArray) void {
+        for (self.store[0..self.idx], 0..self.idx) |c, i| {
+            dest.set(i, c);
+        }
     }
+
     fn len(self: Self) usize {
         return self.idx;
     }
@@ -288,35 +304,26 @@ fn char_to_num(char: u8) u32 {
     return @intCast(char - 48);
 }
 
-fn set_initial_variables(variables: []const u8) !void {
-    print("working {s} & len = {}\n", .{ variables, variables.len });
-
-    // store the variables in a bounded array to avoid use after free
-    var vars = try ConvBoundedArray.init(5);
-    for (variables, 0..variables.len) |c, i| {
-        vars.set(i, c);
-    }
-    try vars.resize(variables.len);
+fn set_initial_variables(variables: ConvBoundedArray, pallocator: std.mem.Allocator) !void {
+    var vars = variables.constSlice();
 
     // get the max decimal number to be attained while calculating
     var max = pow(2, @intCast(variables.len));
 
     // a buffer to store the binary string
     var buffer = try ConvBoundedArray.init(20);
-    for (variables, 0..variables.len) |c, i| {
+    for (vars, 0..variables.len) |c, i| {
         _ = c;
         var idx: usize = 0;
         for (0..max) |item| {
-            const bin_str = try adjust(variables.len, (try base_10_to_binary(@intCast(item))).constSlice());
+            const bin_str = try adjust(vars.len, (try base_10_to_binary(@intCast(item))).constSlice());
             buffer.set(idx, bin_str.get(i));
             idx += 1;
         }
         try buffer.resize(max);
 
-        // please make an ugly fuckery here till it works
-        var s: [1]u8 = undefined;
-        s[0] = vars.get(i);
-        try store.put([1]u8{vars.get(i)}, buffer);
+        var key = try pallocator.alloc([1]u8, &[1]u8{variables.get(i)});
+        try store.put(key, buffer);
     }
 }
 
