@@ -25,7 +25,7 @@ struct BoolDict {
 }
 
 impl BoolDict {
-    fn add(self: &mut Self, char: char) {
+    fn add(&mut self, char: char) {
         if char.is_alphanumeric() && !self.tokens.contains(&char) {
             self.tokens.push(char);
         }
@@ -43,7 +43,7 @@ struct Node {
 #[derive(Debug)]
 enum NodeKind {
     TreeNode(Box<Node>),
-    STRING(String),
+    String(String),
 }
 
 struct TokenStream {
@@ -55,7 +55,7 @@ impl TokenStream {
         TokenStream { tokens }
     }
 
-    fn consume(self: &mut Self) -> char {
+    fn consume(&mut self) -> char {
         if self.tokens.len() > 1 {
             return self.tokens.remove(0);
         }
@@ -82,12 +82,9 @@ fn main() {
         let expression_tree = parse(&mut stream, &mut 0, &false);
         println!("{:#?}", expression_tree);
 
-        match expression_tree {
-            NodeKind::TreeNode(tree_node) => {
-                let result = generate_truth(*tree_node, &mut store);
-                println!("Result = {}", result);
-            }
-            _ => {}
+        if let NodeKind::TreeNode(tree_node) = expression_tree {
+            let result = generate_truth(*tree_node, &mut store);
+            println!("-> {}", result);
         }
         println!();
     }
@@ -144,18 +141,15 @@ fn binary_string(n: u32, adjust: Option<u32>) -> Vec<u32> {
         result.push(remainder);
     }
 
-    match adjust {
-        Some(adj) => {
-            let mut diff = adj - result.len() as u32;
-            loop {
-                if diff == 0 {
-                    break;
-                }
-                result.push(0);
-                diff -= 1;
+    if let Some(adj) = adjust {
+        let mut diff = adj - result.len() as u32;
+        loop {
+            if diff == 0 {
+                break;
             }
+            result.push(0);
+            diff -= 1;
         }
-        None => {}
     }
 
     result.reverse();
@@ -173,9 +167,9 @@ fn parse(stream: &mut TokenStream, braces: &mut u32, not: &bool) -> NodeKind {
         left_node = stream.consume();
     }
 
-    let mut left_node_kind: NodeKind = NodeKind::STRING(String::from(String::from(
+    let mut left_node_kind: NodeKind = NodeKind::String(
         if f_not { "!".to_owned() } else { "".to_owned() } + &String::from(left_node),
-    )));
+    );
 
     if left_node == '(' {
         *braces += 1;
@@ -202,11 +196,11 @@ fn parse(stream: &mut TokenStream, braces: &mut u32, not: &bool) -> NodeKind {
                     not: *not,
                 }));
             }
-            NodeKind::STRING(string_node) => {
+            NodeKind::String(string_node) => {
                 return NodeKind::TreeNode(Box::new(Node {
                     left: left_node_kind,
                     operator: next_token,
-                    right: NodeKind::STRING(string_node),
+                    right: NodeKind::String(string_node),
                     not: *not,
                 }));
             }
@@ -218,22 +212,22 @@ fn parse(stream: &mut TokenStream, braces: &mut u32, not: &bool) -> NodeKind {
 fn build_node_str(node: &Node) -> String {
     let mut out = String::from("");
     match &node.left {
-        NodeKind::STRING(str) => {
-            out += &str;
+        NodeKind::String(str) => {
+            out += str;
         }
         NodeKind::TreeNode(sub_node) => {
-            out += &build_node_str(&*sub_node);
+            out += &build_node_str(sub_node);
         }
     }
 
     out += &String::from(node.operator);
 
     match &node.right {
-        NodeKind::STRING(str) => {
-            out += &str;
+        NodeKind::String(str) => {
+            out += str;
         }
         NodeKind::TreeNode(sub_node) => {
-            out += &build_node_str(&*sub_node);
+            out += &build_node_str(sub_node);
         }
     }
     out = "(".to_owned() + &out + ")";
@@ -248,7 +242,7 @@ fn generate_truth(node: Node, store: &mut HashMap<String, String>) -> String {
     let mut a: String;
     let mut b: String;
     match node.left {
-        NodeKind::STRING(var) => {
+        NodeKind::String(var) => {
             if var.len() > 1 {
                 let var_char = String::from(var.as_bytes()[1] as char);
                 let var_value = store.get(&var_char).unwrap();
@@ -268,7 +262,7 @@ fn generate_truth(node: Node, store: &mut HashMap<String, String>) -> String {
     }
     buffer += &String::from(node.operator);
     match node.right {
-        NodeKind::STRING(var) => {
+        NodeKind::String(var) => {
             if var.len() > 1 {
                 let var_char = String::from(var.as_bytes()[1] as char);
                 let var_value = store.get(&var_char).unwrap();
@@ -301,12 +295,7 @@ fn generate_truth(node: Node, store: &mut HashMap<String, String>) -> String {
 }
 
 fn is_op(char: char) -> bool {
-    match char {
-        '+' => true,
-        '.' => true,
-        '!' => true,
-        _ => false,
-    }
+    matches!(char, '+' | '!' | '.')
 }
 
 // takes a node with no children
@@ -337,8 +326,9 @@ fn evaluate_node(a: String, operator: char, b: String, not: Option<bool>) -> Str
 }
 
 fn compute(a: char, b: char, operator: char) -> char {
-    let _a = if a == '1' { true } else { false };
-    let _b = if b == '1' { true } else { false };
+    let _a = a == '1';
+    let _b = b == '1';
+
     let result = match operator {
         '+' => _a || _b,
         '.' => _a && _b,
