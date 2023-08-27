@@ -79,7 +79,7 @@ fn main() {
         build_initial_table(dict.tokens.into_iter().collect::<String>(), &mut store);
 
         let mut stream = TokenStream::new(user_input);
-        let expression_tree = parse(&mut stream, &mut 0, &false);
+        let expression_tree = parse(&mut stream, &false);
         println!("{:#?}", expression_tree);
 
         if let NodeKind::TreeNode(tree_node) = expression_tree {
@@ -157,7 +157,7 @@ fn binary_string(n: u32, adjust: Option<u32>) -> Vec<u32> {
     result
 }
 
-fn parse(stream: &mut TokenStream, braces: &mut u32, not: &bool) -> NodeKind {
+fn parse(stream: &mut TokenStream, not: &bool) -> NodeKind {
     let mut f_not = false;
 
     let mut left_node = stream.consume();
@@ -172,20 +172,18 @@ fn parse(stream: &mut TokenStream, braces: &mut u32, not: &bool) -> NodeKind {
     );
 
     if left_node == '(' {
-        *braces += 1;
-        left_node_kind = parse(stream, braces, &f_not);
+        left_node_kind = parse(stream, &f_not);
         left_node = stream.consume();
     }
 
     if left_node == ')' {
-        *braces -= 1;
         return left_node_kind;
     }
 
     let next_token = stream.consume();
 
     if is_op(next_token) {
-        let right_node = parse(stream, braces, not);
+        let right_node = parse(stream, not);
 
         match right_node {
             NodeKind::TreeNode(boxed_node) => {
