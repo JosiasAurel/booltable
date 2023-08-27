@@ -64,12 +64,13 @@ impl TokenStream {
 
 fn main() {
     let mut store = HashMap::<String, String>::new();
-    let sample_expression = String::from("a.b.!c.d");
+    let sample_expression = String::from("a.b.!(c.d)");
     let dict = lexer(sample_expression.clone());
 
     build_initial_table(dict.tokens.into_iter().collect::<String>(), &mut store);
 
-    let expression_tree = parse(sample_expression);
+    let mut stream = TokenStream::new(sample_expression);
+    let expression_tree = parse(&mut stream, &mut 0, &false);
     println!("{:#?}", expression_tree);
 
     match expression_tree {
@@ -154,23 +155,33 @@ fn binary_string(n: u32, adjust: Option<u32>) -> Vec<u32> {
     result
 }
 
-fn parse(expression: String) -> NodeKind {
-    let mut stream = TokenStream::new(expression);
-    let mut not: bool = false;
+fn parse(stream: &mut TokenStream, braces: &mut u32, not: &bool) -> NodeKind {
+    let mut f_not = false;
 
     let mut left_node = stream.consume();
+    
     if left_node == '!' {
-        not = true;
+        f_not = true;
         left_node = stream.consume();
     }
+
+    let mut left_node_kind: NodeKind = NodeKind::STRING(String::from(String::from(if f_not { "!".to_owned() } else { "".to_owned() } + &String::from(left_node))));
+
+    if left_node == '(' {
+        *braces += 1;
+        left_node_kind = parse(stream, braces, &f_not);
+        left_node = stream.consume();
+    }
+
+    if left_node == ')' {
+        *braces -= 1;
+        return left_node_kind;
+    }
+    
     let next_token = stream.consume();
 
-    let left_node_kind = NodeKind::STRING(String::from(String::from(if not { "!".to_owned() } else { "".to_owned() } + &String::from(left_node))));
     if is_op(next_token) {
-        if next_token == '!' {
-            println!();
-        }
-        let right_node = parse(stream.tokens);
+        let right_node = parse(stream, braces, not);
 
         match right_node {
             NodeKind::TreeNode(boxed_node) => {
@@ -178,7 +189,7 @@ fn parse(expression: String) -> NodeKind {
                     left: left_node_kind,
                     operator: next_token,
                     right: NodeKind::TreeNode(boxed_node),
-                    not: false,
+                    not: *not,
                 }));
             }
             NodeKind::STRING(string_node) => {
@@ -186,7 +197,7 @@ fn parse(expression: String) -> NodeKind {
                     left: left_node_kind,
                     operator: next_token,
                     right: NodeKind::STRING(string_node),
-                    not: false,
+                    not: *not,
                 }));
             }
         }
@@ -215,6 +226,7 @@ fn build_node_str(node: &Node) -> String {
             out += &build_node_str(&*sub_node);
         }
     }
+    out = "(".to_owned() + &out + ")";
     if node.not {
         return "!".to_owned() + &out;
     }
@@ -267,9 +279,14 @@ fn generate_truth(node: Node, store: &mut HashMap<String, String>) -> String {
     a = String::from(store.get(&a).unwrap());
     b = String::from(store.get(&b).unwrap());
 
-    let result = evaluate_node(a, node.operator, b, if node.not { Some(true) } else { None });
+    let mut result = evaluate_node(a, node.operator, b.clone(), None);
+    store.insert(buffer.clone(), result.clone());
 
-    store.insert(buffer, result.clone());
+    if node.not {
+        let buffer_value = store.get(&buffer).unwrap();
+        result = evaluate_node(buffer_value.clone(), '!', buffer_value.clone(), Some(true));
+    }
+
     result
 }
 
