@@ -17,6 +17,7 @@ How it works
 // ! -> NOT(Unary)
 
 use std::collections::HashMap;
+use std::io::{stdin, stdout, Write};
 use std::vec::Vec;
 
 struct BoolDict {
@@ -64,24 +65,31 @@ impl TokenStream {
 
 fn main() {
     let mut store = HashMap::<String, String>::new();
-    let sample_expression = String::from("a.b.!(c.d)");
-    let dict = lexer(sample_expression.clone());
 
-    build_initial_table(dict.tokens.into_iter().collect::<String>(), &mut store);
+    loop {
+        print!(">");
+        _ = stdout().flush();
+        let mut user_input = String::new();
+        stdin()
+            .read_line(&mut user_input)
+            .expect("Failed to get user input");
 
-    let mut stream = TokenStream::new(sample_expression);
-    let expression_tree = parse(&mut stream, &mut 0, &false);
-    println!("{:#?}", expression_tree);
+        let dict = lexer(user_input.clone());
 
-    match expression_tree {
-        NodeKind::TreeNode(tree_node) => {
-            let result = generate_truth(*tree_node, &mut store);
-            println!("Result = {}", result);
-            for (k, v) in store.iter() {
-                println!("{} -> {}", k, v);
+        build_initial_table(dict.tokens.into_iter().collect::<String>(), &mut store);
+
+        let mut stream = TokenStream::new(user_input);
+        let expression_tree = parse(&mut stream, &mut 0, &false);
+        println!("{:#?}", expression_tree);
+
+        match expression_tree {
+            NodeKind::TreeNode(tree_node) => {
+                let result = generate_truth(*tree_node, &mut store);
+                println!("Result = {}", result);
             }
+            _ => {}
         }
-        _ => {}
+        println!();
     }
 }
 
@@ -159,13 +167,15 @@ fn parse(stream: &mut TokenStream, braces: &mut u32, not: &bool) -> NodeKind {
     let mut f_not = false;
 
     let mut left_node = stream.consume();
-    
+
     if left_node == '!' {
         f_not = true;
         left_node = stream.consume();
     }
 
-    let mut left_node_kind: NodeKind = NodeKind::STRING(String::from(String::from(if f_not { "!".to_owned() } else { "".to_owned() } + &String::from(left_node))));
+    let mut left_node_kind: NodeKind = NodeKind::STRING(String::from(String::from(
+        if f_not { "!".to_owned() } else { "".to_owned() } + &String::from(left_node),
+    )));
 
     if left_node == '(' {
         *braces += 1;
@@ -177,7 +187,7 @@ fn parse(stream: &mut TokenStream, braces: &mut u32, not: &bool) -> NodeKind {
         *braces -= 1;
         return left_node_kind;
     }
-    
+
     let next_token = stream.consume();
 
     if is_op(next_token) {
@@ -314,7 +324,11 @@ fn evaluate_node(a: String, operator: char, b: String, not: Option<bool>) -> Str
         }
         None => {
             for idx in 0..a.len() {
-                result += &String::from(compute(a_bytes[idx] as char, b_bytes[idx] as char, operator));
+                result += &String::from(compute(
+                    a_bytes[idx] as char,
+                    b_bytes[idx] as char,
+                    operator,
+                ));
             }
         }
     }
