@@ -65,13 +65,24 @@ impl TokenStream {
 
 fn main() {
     let mut store = HashMap::<String, String>::new();
-    let sample_expression = String::from("a+b+c");
+    let sample_expression = String::from("a.b.c");
     let dict = lexer(sample_expression.clone());
 
     build_initial_table(dict.tokens.into_iter().collect::<String>(), &mut store);
 
     let expression_tree = parse(sample_expression);
     println!("{:?}", expression_tree);
+
+    match expression_tree {
+        NodeKind::TreeNode(tree_node) => {
+            let result = generate_truth(*tree_node, &mut store);
+            println!("Result = {}", result);
+            for (k, v) in store.iter() {
+                println!("{} -> {}", k, v);
+            }
+        },
+        _ => {}
+    }
 }
 
 fn lexer(expression: String) -> BoolDict {
@@ -155,7 +166,6 @@ fn parse(expression: String) -> NodeKind {
 
         match right_node {
             NodeKind::TreeNode(boxed_node) => {
-                println!("got here once");
                return NodeKind::TreeNode(Box::new(Node {
                 left: NodeKind::STRING(String::from(left_node)),
                 operator: next_token,
@@ -174,6 +184,70 @@ fn parse(expression: String) -> NodeKind {
     NodeKind::STRING(String::from(left_node))
 }
 
+fn build_node_str(node: &Node) -> String {
+   let mut out = String::from("");
+   match &node.left {
+    NodeKind::STRING(str) => {
+        out += &str;
+    },
+    NodeKind::TreeNode(sub_node) => {
+        out += &build_node_str(&*sub_node);
+    }
+   }
+
+   out += &String::from(node.operator);
+
+    match &node.right {
+    NodeKind::STRING(str) => {
+        out += &str;
+    },
+    NodeKind::TreeNode(sub_node) => {
+        out += &build_node_str(&*sub_node);
+    }
+   }
+
+   out
+}
+
+fn generate_truth(node: Node, store: &mut HashMap<String, String>) -> String {
+    let mut buffer = String::from("");
+    let mut a: String;
+    let mut b: String;
+    match node.left {
+        NodeKind::STRING(var) => {
+           buffer += &var; 
+           a = var;
+        },
+        NodeKind::TreeNode(sub_node) => {
+            let node_str = build_node_str(&sub_node);
+            let values = generate_truth(*sub_node, &mut store.clone());
+            store.insert(node_str.clone(), values);
+            buffer += &node_str;
+            a = node_str;
+        }
+    }
+    buffer += &String::from(node.operator);
+    match node.right {
+        NodeKind::STRING(var) => {
+           buffer += &var; 
+           b = var;
+        },
+        NodeKind::TreeNode(sub_node) => {
+            let node_str = build_node_str(&sub_node);
+            let values = generate_truth(*sub_node, &mut store.clone());
+            store.insert(node_str.clone(), values);
+            buffer += &node_str;
+            b = node_str;
+        }
+    }
+    a = String::from(store.get(&a).unwrap());
+    b = String::from(store.get(&b).unwrap());
+    let result = evaluate_node(a, node.operator, b);
+    store.insert(buffer, result.clone());
+    result
+
+}
+
 fn is_op(char: char) -> bool {
     match char {
         '+' => true,
@@ -181,4 +255,32 @@ fn is_op(char: char) -> bool {
         '!' => true,
         _ => false
     }
+}
+
+// takes a node with no children 
+// computes the truth value and returns it 
+fn evaluate_node(a: String, operator: char, b: String) -> String {
+    let mut result = String::from("");
+    let a_bytes = a.as_bytes();
+    let b_bytes = b.as_bytes();
+    for idx in 0..a.len() {
+        result += &String::from(compute(
+            a_bytes[idx] as char,
+            b_bytes[idx] as char,
+            operator
+        ));
+    }
+    result
+}
+
+fn compute(a: char, b: char, operator: char) -> char {
+    let _a = if a == '1' { true } else { false };
+    let _b = if b == '1' { true } else { false };
+    let result = match operator {
+        '+' => _a || _b,
+        '.' => _a && _b,
+        '!' => !_a,
+        _ => false
+    };
+    if result { '1' } else { '0' }
 }
