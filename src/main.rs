@@ -35,13 +35,14 @@ impl BoolDict {
 struct Node {
     left: NodeKind,
     operator: char,
-    right: NodeKind
+    right: NodeKind,
+    not: bool,
 }
 
 #[derive(Debug)]
 enum NodeKind {
     TreeNode(Box<Node>),
-    STRING(String)
+    STRING(String),
 }
 
 struct TokenStream {
@@ -50,9 +51,7 @@ struct TokenStream {
 
 impl TokenStream {
     fn new(tokens: String) -> Self {
-        TokenStream {
-            tokens,
-        }
+        TokenStream { tokens }
     }
 
     fn consume(self: &mut Self) -> char {
@@ -65,13 +64,13 @@ impl TokenStream {
 
 fn main() {
     let mut store = HashMap::<String, String>::new();
-    let sample_expression = String::from("a.b.c");
+    let sample_expression = String::from("a.b.!c.d");
     let dict = lexer(sample_expression.clone());
 
     build_initial_table(dict.tokens.into_iter().collect::<String>(), &mut store);
 
     let expression_tree = parse(sample_expression);
-    println!("{:?}", expression_tree);
+    println!("{:#?}", expression_tree);
 
     match expression_tree {
         NodeKind::TreeNode(tree_node) => {
@@ -80,7 +79,7 @@ fn main() {
             for (k, v) in store.iter() {
                 println!("{} -> {}", k, v);
             }
-        },
+        }
         _ => {}
     }
 }
@@ -157,56 +156,69 @@ fn binary_string(n: u32, adjust: Option<u32>) -> Vec<u32> {
 
 fn parse(expression: String) -> NodeKind {
     let mut stream = TokenStream::new(expression);
+    let mut not: bool = false;
 
-    let left_node = stream.consume();
+    let mut left_node = stream.consume();
+    if left_node == '!' {
+        not = true;
+        left_node = stream.consume();
+    }
     let next_token = stream.consume();
 
+    let left_node_kind = NodeKind::STRING(String::from(String::from(if not { "!".to_owned() } else { "".to_owned() } + &String::from(left_node))));
     if is_op(next_token) {
+        if next_token == '!' {
+            println!();
+        }
         let right_node = parse(stream.tokens);
 
         match right_node {
             NodeKind::TreeNode(boxed_node) => {
-               return NodeKind::TreeNode(Box::new(Node {
-                left: NodeKind::STRING(String::from(left_node)),
-                operator: next_token,
-                right: NodeKind::TreeNode(boxed_node)
-               }));
-            },
+                return NodeKind::TreeNode(Box::new(Node {
+                    left: left_node_kind,
+                    operator: next_token,
+                    right: NodeKind::TreeNode(boxed_node),
+                    not: false,
+                }));
+            }
             NodeKind::STRING(string_node) => {
                 return NodeKind::TreeNode(Box::new(Node {
-                    left: NodeKind::STRING(String::from(left_node)),
+                    left: left_node_kind,
                     operator: next_token,
-                    right: NodeKind::STRING(string_node) 
+                    right: NodeKind::STRING(string_node),
+                    not: false,
                 }));
             }
         }
     }
-    NodeKind::STRING(String::from(left_node))
+    left_node_kind
 }
 
 fn build_node_str(node: &Node) -> String {
-   let mut out = String::from("");
-   match &node.left {
-    NodeKind::STRING(str) => {
-        out += &str;
-    },
-    NodeKind::TreeNode(sub_node) => {
-        out += &build_node_str(&*sub_node);
+    let mut out = String::from("");
+    match &node.left {
+        NodeKind::STRING(str) => {
+            out += &str;
+        }
+        NodeKind::TreeNode(sub_node) => {
+            out += &build_node_str(&*sub_node);
+        }
     }
-   }
 
-   out += &String::from(node.operator);
+    out += &String::from(node.operator);
 
     match &node.right {
-    NodeKind::STRING(str) => {
-        out += &str;
-    },
-    NodeKind::TreeNode(sub_node) => {
-        out += &build_node_str(&*sub_node);
+        NodeKind::STRING(str) => {
+            out += &str;
+        }
+        NodeKind::TreeNode(sub_node) => {
+            out += &build_node_str(&*sub_node);
+        }
     }
-   }
-
-   out
+    if node.not {
+        return "!".to_owned() + &out;
+    }
+    out
 }
 
 fn generate_truth(node: Node, store: &mut HashMap<String, String>) -> String {
@@ -215,9 +227,15 @@ fn generate_truth(node: Node, store: &mut HashMap<String, String>) -> String {
     let mut b: String;
     match node.left {
         NodeKind::STRING(var) => {
-           buffer += &var; 
-           a = var;
-        },
+            if var.len() > 1 {
+                let var_char = String::from(var.as_bytes()[1] as char);
+                let var_value = store.get(&var_char).unwrap();
+                let values = evaluate_node(var_value.clone(), '!', var_value.clone(), Some(true));
+                store.insert(var.clone(), values);
+            }
+            buffer += &var;
+            a = var;
+        }
         NodeKind::TreeNode(sub_node) => {
             let node_str = build_node_str(&sub_node);
             let values = generate_truth(*sub_node, &mut store.clone());
@@ -229,9 +247,15 @@ fn generate_truth(node: Node, store: &mut HashMap<String, String>) -> String {
     buffer += &String::from(node.operator);
     match node.right {
         NodeKind::STRING(var) => {
-           buffer += &var; 
-           b = var;
-        },
+            if var.len() > 1 {
+                let var_char = String::from(var.as_bytes()[1] as char);
+                let var_value = store.get(&var_char).unwrap();
+                let values = evaluate_node(var_value.clone(), '!', var_value.clone(), Some(true));
+                store.insert(var.clone(), values);
+            }
+            buffer += &var;
+            b = var;
+        }
         NodeKind::TreeNode(sub_node) => {
             let node_str = build_node_str(&sub_node);
             let values = generate_truth(*sub_node, &mut store.clone());
@@ -242,10 +266,11 @@ fn generate_truth(node: Node, store: &mut HashMap<String, String>) -> String {
     }
     a = String::from(store.get(&a).unwrap());
     b = String::from(store.get(&b).unwrap());
-    let result = evaluate_node(a, node.operator, b);
+
+    let result = evaluate_node(a, node.operator, b, if node.not { Some(true) } else { None });
+
     store.insert(buffer, result.clone());
     result
-
 }
 
 fn is_op(char: char) -> bool {
@@ -253,23 +278,30 @@ fn is_op(char: char) -> bool {
         '+' => true,
         '.' => true,
         '!' => true,
-        _ => false
+        _ => false,
     }
 }
 
-// takes a node with no children 
-// computes the truth value and returns it 
-fn evaluate_node(a: String, operator: char, b: String) -> String {
+// takes a node with no children
+// computes the truth value and returns it
+fn evaluate_node(a: String, operator: char, b: String, not: Option<bool>) -> String {
     let mut result = String::from("");
     let a_bytes = a.as_bytes();
     let b_bytes = b.as_bytes();
-    for idx in 0..a.len() {
-        result += &String::from(compute(
-            a_bytes[idx] as char,
-            b_bytes[idx] as char,
-            operator
-        ));
+
+    match not {
+        Some(_) => {
+            for idx in 0..a.len() {
+                result += &String::from(compute(a_bytes[idx] as char, b_bytes[idx] as char, '!'));
+            }
+        }
+        None => {
+            for idx in 0..a.len() {
+                result += &String::from(compute(a_bytes[idx] as char, b_bytes[idx] as char, operator));
+            }
+        }
     }
+
     result
 }
 
@@ -280,7 +312,11 @@ fn compute(a: char, b: char, operator: char) -> char {
         '+' => _a || _b,
         '.' => _a && _b,
         '!' => !_a,
-        _ => false
+        _ => false,
     };
-    if result { '1' } else { '0' }
+    if result {
+        '1'
+    } else {
+        '0'
+    }
 }
