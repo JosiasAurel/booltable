@@ -65,11 +65,11 @@ impl TokenStream {
 
 fn main() {
     let mut store = HashMap::<String, String>::new();
+    let mut user_input = String::new();
 
     loop {
         print!(">");
         _ = stdout().flush();
-        let mut user_input = String::new();
         stdin()
             .read_line(&mut user_input)
             .expect("Failed to get user input");
@@ -78,7 +78,7 @@ fn main() {
 
         build_initial_table(dict.tokens.into_iter().collect::<String>(), &mut store);
 
-        let mut stream = TokenStream::new(user_input);
+        let mut stream = TokenStream::new(user_input.clone());
         let expression_tree = parse(&mut stream, &false);
         println!("{:#?}", expression_tree);
 
@@ -86,6 +86,9 @@ fn main() {
             let result = generate_truth(*tree_node, &mut store);
             println!("-> {}", result);
         }
+
+        user_input.clear();
+        store.clear();
         println!();
     }
 }
